@@ -1,0 +1,6 @@
+{
+  "name": "KeyMaster NFC",
+  "description": "Программирование беспроводных ключей через NFC с поддержкой MIFARE, Ultralight, NTAG, NDEF, аппаратным AES-GCM шифрованием и AI-анализом безопасности.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

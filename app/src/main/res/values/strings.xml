@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">KeyMaster NFC</string>
+    <string name="hce_service_desc">KeyMaster NFC — Эмуляция ключа доступа</string>
+    <string name="hce_aid_group_desc">Виртуальные ключи и пропуска доступа</string>
+</resources>

@@ -38,8 +38,10 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Nfc
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.automirrored.filled.NavigateNext
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -93,7 +95,8 @@ import com.example.viewmodel.VaultViewModel
 @Composable
 fun EmulationScreen(
     vaultViewModel: VaultViewModel,
-    nfcViewModel: NfcViewModel
+    nfcViewModel: NfcViewModel,
+    onEnterWearMode: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val isEmulationActive by EmulationManager.isEmulationActive.collectAsState()
@@ -322,6 +325,50 @@ fun EmulationScreen(
             Icon(imageVector = Icons.Default.Key, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(8.dp))
             Text("Выбрать другой ключ / дамп для эмуляции", color = CyberCyan, fontSize = 13.sp)
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Dedicated Galaxy Watch Ultra (Wear OS) Mode Card
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onEnterWearMode)
+                .testTag("open_wear_os_mode_card"),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            border = androidx.compose.foundation.BorderStroke(1.dp, GalaxyUltraOrange.copy(alpha = 0.7f))
+        ) {
+            Row(
+                modifier = Modifier.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Watch,
+                    contentDescription = "Galaxy Watch Ultra",
+                    tint = GalaxyUltraOrange,
+                    modifier = Modifier.size(28.dp)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "РЕЖИМ GALAXY WATCH ULTRA (Wear OS)",
+                        color = GalaxyUltraOrange,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
+                    Text(
+                        text = "Круглый экран, быстрый выбор ключей безелем, AMOLED black и виброотклик",
+                        color = TextSecondary,
+                        fontSize = 11.sp
+                    )
+                }
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.NavigateNext,
+                    contentDescription = null,
+                    tint = GalaxyUltraOrange
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(18.dp))

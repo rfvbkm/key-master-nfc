@@ -44,7 +44,9 @@ import com.example.ui.screens.EmulationScreen
 import com.example.ui.screens.KeyDictionaryScreen
 import com.example.ui.screens.ScannerScreen
 import com.example.ui.screens.VaultScreen
+import com.example.ui.screens.WearOsKeyEmulationScreen
 import com.example.ui.screens.WriterScreen
+import com.example.util.HapticHelper
 import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.DarkBg
 import com.example.ui.theme.DarkSurface
@@ -75,7 +77,10 @@ class MainActivity : ComponentActivity(), NfcAdapter.ReaderCallback {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        HapticHelper.init(this)
         nfcAdapter = NfcAdapter.getDefaultAdapter(this)
+
+        val isWatchDevice = packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_WATCH)
 
         // Handle initial NFC tag intent if app was opened by NFC tap
         intent?.let { handleNfcIntent(it) }
@@ -88,6 +93,7 @@ class MainActivity : ComponentActivity(), NfcAdapter.ReaderCallback {
                     aiViewModel = aiViewModel,
                     isNfcAvailable = nfcAdapter != null,
                     isNfcEnabled = nfcAdapter?.isEnabled == true,
+                    isWatchDevice = isWatchDevice,
                     onToggleReaderMode = { enable ->
                         setReaderModeEnabled(enable)
                     }
@@ -154,8 +160,10 @@ fun MainAppScreen(
     aiViewModel: AiViewModel,
     isNfcAvailable: Boolean,
     isNfcEnabled: Boolean,
+    isWatchDevice: Boolean = false,
     onToggleReaderMode: (Boolean) -> Unit
 ) {
+    var isWearOsMode by remember { mutableStateOf(isWatchDevice) }
     var currentTab by remember { mutableStateOf(MainTab.SCANNER) }
     var inDictionarySubScreen by remember { mutableStateOf(false) }
 
@@ -174,8 +182,14 @@ fun MainAppScreen(
         }
     }
 
-    // Handle Back button if inside sub-screens
-    if (inDictionarySubScreen) {
+    // Handle Back button if inside Wear OS mode, sub-screens or main tabs
+    if (isWearOsMode) {
+        BackHandler {
+            if (!isWatchDevice) {
+                isWearOsMode = false
+            }
+        }
+    } else if (inDictionarySubScreen) {
         BackHandler {
             inDictionarySubScreen = false
         }
@@ -183,6 +197,14 @@ fun MainAppScreen(
         BackHandler {
             currentTab = MainTab.SCANNER
         }
+    }
+
+    if (isWearOsMode) {
+        WearOsKeyEmulationScreen(
+            vaultViewModel = vaultViewModel,
+            onExitWearMode = if (!isWatchDevice) { { isWearOsMode = false } } else null
+        )
+        return
     }
 
     Scaffold(
@@ -317,7 +339,8 @@ fun MainAppScreen(
                     )
                     MainTab.EMULATION -> EmulationScreen(
                         vaultViewModel = vaultViewModel,
-                        nfcViewModel = nfcViewModel
+                        nfcViewModel = nfcViewModel,
+                        onEnterWearMode = { isWearOsMode = true }
                     )
                     MainTab.EDITOR -> DumpEditorScreen(
                         nfcViewModel = nfcViewModel,

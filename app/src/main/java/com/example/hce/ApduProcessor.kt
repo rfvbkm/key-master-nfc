@@ -62,6 +62,7 @@ object ApduProcessor {
             }
 
             EmulationManager.logInteraction(cmdHex, SW_SUCCESS.toHex(" "), desc)
+            com.example.util.HapticHelper.vibrateKeyRead()
             return SW_SUCCESS
         }
 
@@ -73,6 +74,7 @@ object ApduProcessor {
                 response.toHex(" "),
                 "GET UID: Отправлен UID ${uidBytes.toHex(":")} (${activeDump?.cardType?.displayName ?: "MIFARE"})"
             )
+            com.example.util.HapticHelper.vibrateKeyRead()
             return response
         }
 

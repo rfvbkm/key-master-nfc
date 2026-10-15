@@ -1,0 +1,204 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (например, v1.0.0). Если пусто — используется SHA.'
+        required: false
+        default: ''
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build release artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      is_prerelease: ${{ steps.meta.outputs.is_prerelease }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Compute release metadata
+        id: meta
+        shell: bash
+        run: |
+          ref="${GITHUB_REF#refs/tags/}"
+          if [ -z "${ref}" ] || [ "${ref}" = "${GITHUB_REF}" ]; then
+            ref="${{ github.event.inputs.tag }}"
+          fi
+          if [ -z "${ref}" ]; then
+            ref="dev-${GITHUB_SHA::7}"
+          fi
+          version="${ref#v}"
+          is_prerelease=false
+          case "${version}" in
+            *-*) is_prerelease=true ;;
+          esac
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=${is_prerelease}" >> "$GITHUB_OUTPUT"
+          echo "Release version: ${version} (prerelease=${is_prerelease})"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Read Gradle version
+        id: gradle_version
+        shell: bash
+        run: |
+          version="$(grep -E '^distributionUrl=' gradle/wrapper/gradle-wrapper.properties \
+            | sed -E 's/.*gradle-([0-9.]+)-bin\.zip/\1/')"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ steps.gradle_version.outputs.version }}
+
+      - name: Generate Gradle wrapper
+        run: gradle wrapper --gradle-version ${{ steps.gradle_version.outputs.version }} --distribution-type bin
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Decode release keystore
+        id: keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "${KEYSTORE_BASE64}" ]; then
+            mkdir -p "${RUNNER_TEMP}/keystore"
+            keystore_path="${RUNNER_TEMP}/keystore/release.jks"
+            printf '%s' "${KEYSTORE_BASE64}" | base64 -d > "${keystore_path}"
+            echo "path=${keystore_path}" >> "$GITHUB_OUTPUT"
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "Keystore decoded to ${keystore_path}"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Secret KEYSTORE_BASE64 is not set — release artifacts will be unsigned."
+          fi
+
+      - name: Assemble universal release APK
+        env:
+          KEYSTORE_PATH: ${{ steps.keystore.outputs.path }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          ./gradlew --no-daemon --stacktrace \
+            -Pandroid.injected.version.name=${{ steps.meta.outputs.version }} \
+            -Pandroid.injected.version.code=${{ github.run_number }} \
+            assembleRelease
+
+      - name: Rename universal APK
+        shell: bash
+        run: |
+          mkdir -p dist
+          for f in app/build/outputs/apk/release/*.apk; do
+            [ -f "$f" ] || continue
+            cp "$f" "dist/KeyMasterNFC-${{ steps.meta.outputs.version }}-universal.apk"
+          done
+
+      - name: Assemble per-ABI release APKs
+        env:
+          KEYSTORE_PATH: ${{ steps.keystore.outputs.path }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for abi in armeabi-v7a arm64-v8a x86 x86_64; do
+            echo "::group::Building release APK for ${abi}"
+            ./gradlew --no-daemon --stacktrace \
+              -Pandroid.injected.build.abi=${abi} \
+              -Pandroid.injected.build.density=xxhdpi \
+              -Pandroid.injected.version.name=${{ steps.meta.outputs.version }} \
+              -Pandroid.injected.version.code=${{ github.run_number }} \
+              assembleRelease
+            for f in app/build/outputs/apk/release/*.apk; do
+              [ -f "$f" ] || continue
+              cp "$f" "dist/KeyMasterNFC-${{ steps.meta.outputs.version }}-${abi}.apk"
+            done
+            echo "::endgroup::"
+          done
+
+      - name: Bundle release AAB (Google Play)
+        env:
+          KEYSTORE_PATH: ${{ steps.keystore.outputs.path }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          ./gradlew --no-daemon --stacktrace \
+            -Pandroid.injected.version.name=${{ steps.meta.outputs.version }} \
+            -Pandroid.injected.version.code=${{ github.run_number }} \
+            bundleRelease
+          for f in app/build/outputs/bundle/release/*.aab; do
+            [ -f "$f" ] || continue
+            cp "$f" "dist/KeyMasterNFC-${{ steps.meta.outputs.version }}.aab"
+          done
+
+      - name: Generate SHA-256 checksums
+        shell: bash
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: build-release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+          path: dist
+
+      - name: List artifacts
+        run: ls -lh dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: KeyMaster NFC ${{ needs.build-release.outputs.version }}
+          generate_release_notes: true
+          prerelease: ${{ needs.build-release.outputs.is_prerelease == 'true' }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.apk
+            dist/*.aab
+            dist/SHA256SUMS.txt
